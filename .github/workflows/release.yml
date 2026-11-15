@@ -1,0 +1,51 @@
+name: Publicar release do PrintFarm
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Obter codigo
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verificar correspondencia entre tag e version.json
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          VERSION="$(node -p "JSON.parse(require('fs').readFileSync('version.json','utf8')).version")"
+          test "${GITHUB_REF_NAME}" = "v${VERSION}" || {
+            echo "::error::Tag ${GITHUB_REF_NAME} nao coincide com version.json (${VERSION})"
+            exit 1
+          }
+
+      - name: Testes de integracao
+        run: |
+          node tests/smoke.mjs
+          node tests/bambu-lan.mjs
+          node tests/updater.mjs
+
+      - name: Empacotar atualizacao
+        run: bash criar-release.sh
+
+      - name: Publicar release estavel
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/printfarm-release.zip \
+            --verify-tag \
+            --title "PrintFarm $GITHUB_REF_NAME" \
+            --generate-notes
